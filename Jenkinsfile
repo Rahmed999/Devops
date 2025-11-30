@@ -27,7 +27,8 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t ${DOCKER_IMAGE} ."
+                sh 'docker build -t ahmedridha92618/devopspipline/my-app:latest /home/vagrant/docker'
+
             }
         }
 
