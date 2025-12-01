@@ -30,25 +30,30 @@ pipeline {
             }
         }
 
-    stage('Push Docker Image') {
-    steps {
-        withCredentials([usernamePassword(
-            credentialsId: DOCKER_CREDENTIALS,
-            passwordVariable: 'DOCKER_PASS',
-            usernameVariable: 'DOCKER_USER'
-        )]) {
-            sh '''
-                export DOCKER_CLIENT_TIMEOUT=300
-                export COMPOSE_HTTP_TIMEOUT=300
-                echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                docker push --max-concurrent-uploads=1 ${DOCKER_IMAGE}
-            '''
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDENTIALS,
+                    passwordVariable: 'DOCKER_PASS',
+                    usernameVariable: 'DOCKER_USER'
+                )]) {
+                    sh '''
+                        export DOCKER_CLIENT_TIMEOUT=300
+                        export COMPOSE_HTTP_TIMEOUT=300
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push --max-concurrent-uploads=1 ${DOCKER_IMAGE}
+                    '''
+                }
+            }
         }
     }
-}
 
     post {
-        success { echo 'Pipeline completed successfully!' }
-        failure { echo 'Pipeline failed. Check the logs!' }
+        success { 
+            echo 'Pipeline completed successfully!' 
+        }
+        failure { 
+            echo 'Pipeline failed. Check the logs!' 
+        }
     }
 }
