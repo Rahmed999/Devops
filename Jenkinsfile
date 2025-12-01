@@ -37,12 +37,23 @@ pipeline {
                     passwordVariable: 'DOCKER_PASS',
                     usernameVariable: 'DOCKER_USER'
                 )]) {
-                    sh '''
-                        export DOCKER_CLIENT_TIMEOUT=300
-                        export COMPOSE_HTTP_TIMEOUT=300
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker push --max-concurrent-uploads=1 ${DOCKER_IMAGE}
-                    '''
+                    script {
+                        int retries = 3
+                        for (int i = 1; i <= retries; i++) {
+                            try {
+                                sh '''
+                                    export DOCKER_CLIENT_TIMEOUT=300
+                                    export COMPOSE_HTTP_TIMEOUT=300
+                                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                                    docker push ${DOCKER_IMAGE}
+                                '''
+                                break // success
+                            } catch (err) {
+                                echo "Push attempt ${i} failed. Retrying..."
+                                if (i == retries) { throw err }
+                            }
+                        }
+                    }
                 }
             }
         }
