@@ -2,13 +2,12 @@ pipeline {
     agent any
 
     tools { 
-        maven 'M2_HOME' // Make sure this matches your Jenkins Maven installation
+        maven 'M2_HOME'
     }
 
     environment {
-        DOCKER_IMAGE = "ahmedridha92618/devopspipline/my-app:latest"
-        DOCKER_REGISTRY = "docker.io"
-        DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f" // Replace with your Jenkins Docker credentials ID
+        DOCKER_IMAGE = "ahmedridha92618/devopspipline:latest"
+        DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
     }
 
     stages {
@@ -21,21 +20,23 @@ pipeline {
 
         stage('Build with Maven') {
             steps {
-                sh 'mvn clean install'
+                sh 'mvn clean package -DskipTests'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t ahmedridha92618/devopspipline/my-app:latest -f docker/Dockerfile .'
-
-
+                sh 'docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .'
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: "e0a06806-724b-42d2-9c5f-83a5d664075f", passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDENTIALS,
+                    passwordVariable: 'DOCKER_PASS',
+                    usernameVariable: 'DOCKER_USER'
+                )]) {
                     sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                     sh "docker push ${DOCKER_IMAGE}"
                 }
@@ -44,11 +45,7 @@ pipeline {
     }
 
     post {
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed. Check the logs!'
-        }
+        success { echo 'Pipeline completed successfully!' }
+        failure { echo 'Pipeline failed. Check the logs!' }
     }
 }
