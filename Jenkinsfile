@@ -65,22 +65,27 @@ pipeline {
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Deploy MySQL to Kubernetes') {
             steps {
                 script {
                     sh '''
-                        echo "Applying Kubernetes manifests..."
+                        echo "Deploying MySQL..."
+                        kubectl apply -f kub/mysql-deployment.yaml --namespace=${K8S_NAMESPACE} --validate=false
+                        echo "MySQL Deployment Finished!"
+                        kubectl get pods --namespace=${K8S_NAMESPACE}
+                        kubectl get svc --namespace=${K8S_NAMESPACE}
+                    '''
+                }
+            }
+        }
 
-                        # Deploy MySQL first
-                        kubectl apply -f kub/mysql.yaml --namespace=${K8S_NAMESPACE} --validate=false
-
-                        # Update app deployment image
-                        kubectl set image deployment/studentmang-app studentmang-app=${DOCKER_IMAGE} --namespace=${K8S_NAMESPACE} --record
-
-                        # Apply service
-                        kubectl apply -f kub/service.yaml --namespace=${K8S_NAMESPACE} --validate=false
-
-                        echo "Deployment Finished!"
+        stage('Deploy Spring Boot to Kubernetes') {
+            steps {
+                script {
+                    sh '''
+                        echo "Deploying Spring Boot App..."
+                        kubectl apply -f kub/spring-deployment.yaml --namespace=${K8S_NAMESPACE} --validate=false
+                        echo "Spring Boot Deployment Finished!"
                         kubectl get pods --namespace=${K8S_NAMESPACE}
                         kubectl get svc --namespace=${K8S_NAMESPACE}
                     '''
