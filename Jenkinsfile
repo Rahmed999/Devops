@@ -2,17 +2,24 @@ pipeline {
     agent any
 
     tools { 
-        maven 'M2_HOME'   // Maven installation name in Jenkins
+        maven 'M2_HOME'
     }
 
     environment {
         DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
+
         IMAGE_TAG = "${env.GIT_COMMIT}"
-        DOCKER_IMAGE = "ahmedridha92618/devopspipline:${IMAGE_TAG}"
+
+        NEXUS_HOST = "192.168.33.10:8085"      // Nexus docker port
+        NEXUS_REPO = "docker-repo"
+
+        DOCKER_IMAGE = "${NEXUS_HOST}/${NEXUS_REPO}/student-app:${IMAGE_TAG}"
+
         K8S_NAMESPACE = "devops"
     }
 
     stages {
+
         stage('Checkout Git') {
             steps {
                 echo "Checking out Git repository..."
@@ -34,36 +41,21 @@ pipeline {
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push Docker Image to Nexus') {
             steps {
-                echo "Pushing Docker image..."
+                echo "Pushing Docker image to Nexus..."
+
                 withCredentials([usernamePassword(
                     credentialsId: DOCKER_CREDENTIALS,
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    script {
-                        int retries = 3
-                        for (int i = 1; i <= retries; i++) {
-                            try {
-                                sh '''
-                                    set -e
-                                    export DOCKER_CLIENT_TIMEOUT=300
-                                    export COMPOSE_HTTP_TIMEOUT=300
-                                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                                    docker push ${DOCKER_IMAGE}
-                                    docker logout
-                                '''
-                                echo "Docker push succeeded on attempt ${i}"
-                                break
-                            } catch (err) {
-                                echo "Push attempt ${i} failed. Retrying..."
-                                if (i == retries) {
-                                    error("Docker push failed after ${retries} attempts")
-                                }
-                            }
-                        }
-                    }
+
+                    sh """
+                        echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
+                        docker push ${DOCKER_IMAGE}
+                        docker logout ${NEXUS_HOST}
+                    """
                 }
             }
         }
@@ -71,23 +63,20 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 echo "Deploying to Kubernetes..."
-                script {
-                    // These paths are **relative to the Jenkins workspace**
-                    sh """
-                        # Create namespace if it doesn't exist
-                        kubectl get ns ${K8S_NAMESPACE} || kubectl create ns ${K8S_NAMESPACE}
 
-                        # Deploy MySQL
-                        kubectl apply -f kub/mysql-deployment.yaml --namespace=${K8S_NAMESPACE} --validate=false
+                sh """
+                    kubectl get ns ${K8S_NAMESPACE} || kubectl create ns ${K8S_NAMESPACE}
 
-                        # Deploy Spring Boot app
-                        kubectl apply -f kub/spring-deployment.yaml --namespace=${K8S_NAMESPACE} --validate=false
+                    kubectl apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
+                    kubectl apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
-                        echo "Deployment finished!"
-                        kubectl get pods --namespace=${K8S_NAMESPACE}
-                        kubectl get svc --namespace=${K8S_NAMESPACE}
-                    """
-                }
+                    # Update image to newest version from Nexus
+                    kubectl set image deployment/student-app student-app=${DOCKER_IMAGE} \
+                        -n ${K8S_NAMESPACE} --record
+
+                    kubectl get pods -n ${K8S_NAMESPACE}
+                    kubectl get svc -n ${K8S_NAMESPACE}
+                """
             }
         }
     }

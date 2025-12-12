@@ -1,41 +1,44 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: student-app
+  name: mysql
   namespace: devops
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: student-app
+      app: mysql
   template:
     metadata:
       labels:
-        app: student-app
+        app: mysql
     spec:
       containers:
-        - name: student-app
-          image: ahmedridha92618/devopspipline:latest
-          ports:
-            - containerPort: 8080
+        - name: mysql
+          image: mysql:8
           env:
-            - name: SPRING_DATASOURCE_URL
-              value: jdbc:mysql://mysql-service:3306/springdb
-            - name: SPRING_DATASOURCE_USERNAME
+            - name: MYSQL_ROOT_PASSWORD
               value: root
-            - name: SPRING_DATASOURCE_PASSWORD
-              value: root
+            - name: MYSQL_DATABASE
+              value: springdb
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: mysql-data
+          emptyDir: {}   # For testing, no persistence
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: student-service
+  name: mysql-service
   namespace: devops
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
-    app: student-app
+    app: mysql
   ports:
-    - port: 8080
-      targetPort: 8080
-      nodePort: 30080
+    - port: 3306
+      targetPort: 3306

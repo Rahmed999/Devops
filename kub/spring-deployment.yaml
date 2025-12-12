@@ -13,9 +13,11 @@ spec:
       labels:
         app: student-app
     spec:
+      imagePullSecrets:
+        - name: nexus-secret        # ← ADD HERE
       containers:
         - name: student-app
-          image: ahmedridha92618/devopspipline:latest
+          image: 192.168.33.10:8085/docker-repo/devopspipeline:latest
           ports:
             - containerPort: 8080
           env:
