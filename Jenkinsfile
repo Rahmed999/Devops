@@ -6,8 +6,11 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE = "ahmedridha92618/devopspipline:latest"
         DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
+        // Use Git commit SHA for unique Docker image tag
+        IMAGE_TAG = "${env.GIT_COMMIT}"
+        DOCKER_IMAGE = "ahmedridha92618/devopspipline:${IMAGE_TAG}"
+        K8S_NAMESPACE = "devops"
     }
 
     stages {
@@ -29,26 +32,6 @@ pipeline {
                 sh 'docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .'
             }
         }
-	stage('Deploy to Kubernetes') {
-    steps {
-        script {
-            sh '''
-                echo "Applying Kubernetes manifests..."
-
-                # Update Deployment with latest Docker image
-                sed -i "s|image: .*|image: ${DOCKER_IMAGE}|" k8s/deployment.yaml
-
-                kubectl apply -f kub/mysql.yaml
-                kubectl apply -f kub/deployment.yaml
-                kubectl apply -f kub/service.yaml
-
-                echo "Deployment Finished!"
-                kubectl get pods
-                kubectl get svc
-            '''
-        }
-    }
-}
 
         stage('Push Docker Image') {
             steps {
@@ -61,13 +44,13 @@ pipeline {
                         int retries = 3
                         for (int i = 1; i <= retries; i++) {
                             try {
-                                // Properly separate commands to avoid shell errors
                                 sh '''
                                     set -e
                                     export DOCKER_CLIENT_TIMEOUT=300
                                     export COMPOSE_HTTP_TIMEOUT=300
                                     echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                                     docker push ${DOCKER_IMAGE}
+                                    docker logout
                                 '''
                                 echo "Docker push succeeded on attempt ${i}"
                                 break
@@ -79,6 +62,29 @@ pipeline {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    sh '''
+                        echo "Applying Kubernetes manifests..."
+
+                        # Deploy MySQL first
+                        kubectl apply -f kub/mysql.yaml --namespace=${K8S_NAMESPACE}
+
+                        # Update app deployment image
+                        kubectl set image deployment/studentmang-app studentmang-app=${DOCKER_IMAGE} --namespace=${K8S_NAMESPACE} --record
+
+                        # Apply service
+                        kubectl apply -f kub/service.yaml --namespace=${K8S_NAMESPACE}
+
+                        echo "Deployment Finished!"
+                        kubectl get pods --namespace=${K8S_NAMESPACE}
+                        kubectl get svc --namespace=${K8S_NAMESPACE}
+                    '''
                 }
             }
         }
