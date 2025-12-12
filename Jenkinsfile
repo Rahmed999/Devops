@@ -51,11 +51,12 @@ pipeline {
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
 
-                    sh """
-                        echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
-                        docker push ${DOCKER_IMAGE}
-                        docker logout ${NEXUS_HOST}
-                    """
+                   sh '''
+                set -e
+                echo "$DOCKER_PASS" | docker login 192.168.33.10:8085 -u "$DOCKER_USER" --password-stdin
+                docker push ${DOCKER_IMAGE}
+                docker logout 192.168.33.10:8085
+            	'''
                 }
             }
         }
