@@ -67,28 +67,23 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                withCredentials([file(credentialsId: 'KUBECONFIG_CRED', variable: 'KUBECONFIG')]) {
-                    script {
-                        sh '''
-                            echo "Applying Kubernetes manifests..."
+                script {
+                    sh '''
+                        echo "Applying Kubernetes manifests..."
 
-                            # Use the kubeconfig provided by Jenkins
-                            export KUBECONFIG=${KUBECONFIG}
+                        # Deploy MySQL first
+                        kubectl apply -f kub/mysql.yaml --namespace=${K8S_NAMESPACE} --validate=false
 
-                            # Deploy MySQL first
-                            kubectl apply -f kub/mysql.yaml --namespace=${K8S_NAMESPACE}
+                        # Update app deployment image
+                        kubectl set image deployment/studentmang-app studentmang-app=${DOCKER_IMAGE} --namespace=${K8S_NAMESPACE} --record
 
-                            # Update app deployment image
-                            kubectl set image deployment/studentmang-app studentmang-app=${DOCKER_IMAGE} --namespace=${K8S_NAMESPACE} --record
+                        # Apply service
+                        kubectl apply -f kub/service.yaml --namespace=${K8S_NAMESPACE} --validate=false
 
-                            # Apply service
-                            kubectl apply -f kub/service.yaml --namespace=${K8S_NAMESPACE}
-
-                            echo "Deployment Finished!"
-                            kubectl get pods --namespace=${K8S_NAMESPACE}
-                            kubectl get svc --namespace=${K8S_NAMESPACE}
-                        '''
-                    }
+                        echo "Deployment Finished!"
+                        kubectl get pods --namespace=${K8S_NAMESPACE}
+                        kubectl get svc --namespace=${K8S_NAMESPACE}
+                    '''
                 }
             }
         }
