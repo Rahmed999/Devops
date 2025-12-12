@@ -29,6 +29,26 @@ pipeline {
                 sh 'docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .'
             }
         }
+	stage('Deploy to Kubernetes') {
+    steps {
+        script {
+            sh '''
+                echo "Applying Kubernetes manifests..."
+
+                # Update Deployment with latest Docker image
+                sed -i "s|image: .*|image: ${DOCKER_IMAGE}|" k8s/deployment.yaml
+
+                kubectl apply -f kub/mysql.yaml
+                kubectl apply -f kub/deployment.yaml
+                kubectl apply -f kub/service.yaml
+
+                echo "Deployment Finished!"
+                kubectl get pods
+                kubectl get svc
+            '''
+        }
+    }
+}
 
         stage('Push Docker Image') {
             steps {
