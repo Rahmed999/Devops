@@ -7,7 +7,6 @@ pipeline {
 
     environment {
         DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
-        // Use Git commit SHA for unique Docker image tag
         IMAGE_TAG = "${env.GIT_COMMIT}"
         DOCKER_IMAGE = "ahmedridha92618/devopspipline:${IMAGE_TAG}"
         K8S_NAMESPACE = "devops"
@@ -68,23 +67,28 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    sh '''
-                        echo "Applying Kubernetes manifests..."
+                withCredentials([file(credentialsId: 'KUBECONFIG_CRED', variable: 'KUBECONFIG')]) {
+                    script {
+                        sh '''
+                            echo "Applying Kubernetes manifests..."
 
-                        # Deploy MySQL first
-                        kubectl apply -f kub/mysql.yaml --namespace=${K8S_NAMESPACE}
+                            # Use the kubeconfig provided by Jenkins
+                            export KUBECONFIG=${KUBECONFIG}
 
-                        # Update app deployment image
-                        kubectl set image deployment/studentmang-app studentmang-app=${DOCKER_IMAGE} --namespace=${K8S_NAMESPACE} --record
+                            # Deploy MySQL first
+                            kubectl apply -f kub/mysql.yaml --namespace=${K8S_NAMESPACE}
 
-                        # Apply service
-                        kubectl apply -f kub/service.yaml --namespace=${K8S_NAMESPACE}
+                            # Update app deployment image
+                            kubectl set image deployment/studentmang-app studentmang-app=${DOCKER_IMAGE} --namespace=${K8S_NAMESPACE} --record
 
-                        echo "Deployment Finished!"
-                        kubectl get pods --namespace=${K8S_NAMESPACE}
-                        kubectl get svc --namespace=${K8S_NAMESPACE}
-                    '''
+                            # Apply service
+                            kubectl apply -f kub/service.yaml --namespace=${K8S_NAMESPACE}
+
+                            echo "Deployment Finished!"
+                            kubectl get pods --namespace=${K8S_NAMESPACE}
+                            kubectl get svc --namespace=${K8S_NAMESPACE}
+                        '''
+                    }
                 }
             }
         }
