@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     tools { 
-        maven 'M2_HOME'
+        maven 'M2_HOME'   // Maven installation name in Jenkins
     }
 
     environment {
@@ -15,29 +15,32 @@ pipeline {
     stages {
         stage('Checkout Git') {
             steps {
-                git branch: 'main', 
-                    url: 'https://github.com/Rahmed999/Devops.git'
+                echo "Checking out Git repository..."
+                git branch: 'main', url: 'https://github.com/Rahmed999/Devops.git'
             }
         }
 
         stage('Build with Maven') {
             steps {
+                echo "Building project with Maven..."
                 sh 'mvn clean package -DskipTests'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .'
+                echo "Building Docker image..."
+                sh "docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile ."
             }
         }
 
         stage('Push Docker Image') {
             steps {
+                echo "Pushing Docker image..."
                 withCredentials([usernamePassword(
                     credentialsId: DOCKER_CREDENTIALS,
-                    passwordVariable: 'DOCKER_PASS',
-                    usernameVariable: 'DOCKER_USER'
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
                 )]) {
                     script {
                         int retries = 3
@@ -55,7 +58,7 @@ pipeline {
                                 break
                             } catch (err) {
                                 echo "Push attempt ${i} failed. Retrying..."
-                                if (i == retries) { 
+                                if (i == retries) {
                                     error("Docker push failed after ${retries} attempts")
                                 }
                             }
@@ -65,41 +68,36 @@ pipeline {
             }
         }
 
-        stage('Deploy MySQL to Kubernetes') {
+        stage('Deploy to Kubernetes') {
             steps {
+                echo "Deploying to Kubernetes..."
                 script {
-                    sh '''
-                        echo "Deploying MySQL..."
-                        kubectl apply -f kub/mysql-deployment.yaml --namespace=${K8S_NAMESPACE} --validate=false
-                        echo "MySQL Deployment Finished!"
-                        kubectl get pods --namespace=${K8S_NAMESPACE}
-                        kubectl get svc --namespace=${K8S_NAMESPACE}
-                    '''
-                }
-            }
-        }
+                    // These paths are **relative to the Jenkins workspace**
+                    sh """
+                        # Create namespace if it doesn't exist
+                        kubectl get ns ${K8S_NAMESPACE} || kubectl create ns ${K8S_NAMESPACE}
 
-        stage('Deploy Spring Boot to Kubernetes') {
-            steps {
-                script {
-                    sh '''
-                        echo "Deploying Spring Boot App..."
+                        # Deploy MySQL
+                        kubectl apply -f kub/mysql-deployment.yaml --namespace=${K8S_NAMESPACE} --validate=false
+
+                        # Deploy Spring Boot app
                         kubectl apply -f kub/spring-deployment.yaml --namespace=${K8S_NAMESPACE} --validate=false
-                        echo "Spring Boot Deployment Finished!"
+
+                        echo "Deployment finished!"
                         kubectl get pods --namespace=${K8S_NAMESPACE}
                         kubectl get svc --namespace=${K8S_NAMESPACE}
-                    '''
+                    """
                 }
             }
         }
     }
 
     post {
-        success { 
-            echo 'Pipeline completed successfully!' 
+        success {
+            echo 'Pipeline completed successfully!'
         }
-        failure { 
-            echo 'Pipeline failed. Check the logs!' 
+        failure {
+            echo 'Pipeline failed. Check the logs!'
         }
     }
 }
