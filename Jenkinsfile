@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     tools { 
-        maven 'M2_HOME'
+        maven 'M2_HOME'   // Make sure this matches your Jenkins Maven tool name
     }
 
     environment {
@@ -16,6 +16,9 @@ pipeline {
         DOCKER_IMAGE = "${NEXUS_HOST}/${NEXUS_REPO}/student-app:${IMAGE_TAG}"
 
         K8S_NAMESPACE = "devops"
+
+        // Make Jenkins use the vagrant kubeconfig
+        KUBECONFIG = "/home/vagrant/.kube/config"
     }
 
     stages {
@@ -53,9 +56,9 @@ pipeline {
 
                    sh '''
                 set -e
-                echo "$DOCKER_PASS" | docker login 192.168.33.10:8085 -u "$DOCKER_USER" --password-stdin
+                echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
                 docker push ${DOCKER_IMAGE}
-                docker logout 192.168.33.10:8085
+                docker logout ${NEXUS_HOST}
             	'''
                 }
             }
@@ -66,15 +69,27 @@ pipeline {
                 echo "Deploying to Kubernetes..."
 
                 sh """
+                    # Ensure namespace exists
                     kubectl get ns ${K8S_NAMESPACE} || kubectl create ns ${K8S_NAMESPACE}
 
+                    # Create docker secret only if it doesn't exist
+                    kubectl get secret nexus-secret -n ${K8S_NAMESPACE} || \
+                    kubectl create secret docker-registry nexus-secret \\
+                        --docker-server=${NEXUS_HOST} \\
+                        --docker-username=admin \\
+                        --docker-password=admin \\
+                        --docker-email=you@example.com \\
+                        -n ${K8S_NAMESPACE}
+
+                    # Apply deployments
                     kubectl apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
                     kubectl apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
-                    # Update image to newest version from Nexus
+                    # Update image to latest
                     kubectl set image deployment/student-app student-app=${DOCKER_IMAGE} \
                         -n ${K8S_NAMESPACE} --record
 
+                    # Check resources
                     kubectl get pods -n ${K8S_NAMESPACE}
                     kubectl get svc -n ${K8S_NAMESPACE}
                 """
