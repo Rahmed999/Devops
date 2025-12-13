@@ -2,17 +2,23 @@ pipeline {
     agent any
 
     tools { 
-        maven 'M2_HOME'   // Match your Jenkins Maven tool name
+        maven 'M2_HOME'   // Make sure this matches your Jenkins Maven tool name
     }
 
     environment {
         DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
+
         IMAGE_TAG = "${env.GIT_COMMIT}"
-        NEXUS_HOST = "192.168.33.10:8085"
+
+        NEXUS_HOST = "192.168.33.10:8085"      // Nexus docker port
         NEXUS_REPO = "docker-repo"
+
         DOCKER_IMAGE = "${NEXUS_HOST}/${NEXUS_REPO}/student-app:${IMAGE_TAG}"
+
         K8S_NAMESPACE = "devops"
-        KUBECONFIG = "/var/lib/jenkins/.kube/config" // Jenkins-accessible kubeconfig
+
+        // Explicit kubeconfig path for Jenkins
+        KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
 
     stages {
@@ -41,17 +47,19 @@ pipeline {
         stage('Push Docker Image to Nexus') {
             steps {
                 echo "Pushing Docker image to Nexus..."
+
                 withCredentials([usernamePassword(
                     credentialsId: DOCKER_CREDENTIALS,
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh '''
-                        set -e
-                        echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
-                        docker push ${DOCKER_IMAGE}
-                        docker logout ${NEXUS_HOST}
-                    '''
+
+                   sh '''
+                set -e
+                echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
+                docker push ${DOCKER_IMAGE}
+                docker logout ${NEXUS_HOST}
+            	'''
                 }
             }
         }
@@ -59,13 +67,15 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 echo "Deploying to Kubernetes..."
+
                 sh """
                     # Ensure namespace exists
-                    kubectl get ns ${K8S_NAMESPACE} || kubectl create ns ${K8S_NAMESPACE}
+                    kubectl --kubeconfig=${KUBECONFIG} get ns ${K8S_NAMESPACE} || \
+                        kubectl --kubeconfig=${KUBECONFIG} create ns ${K8S_NAMESPACE}
 
                     # Create docker secret only if it doesn't exist
-                    kubectl get secret nexus-secret -n ${K8S_NAMESPACE} || \
-                    kubectl create secret docker-registry nexus-secret \\
+                    kubectl --kubeconfig=${KUBECONFIG} get secret nexus-secret -n ${K8S_NAMESPACE} || \
+                    kubectl --kubeconfig=${KUBECONFIG} create secret docker-registry nexus-secret \\
                         --docker-server=${NEXUS_HOST} \\
                         --docker-username=admin \\
                         --docker-password=admin \\
@@ -73,16 +83,16 @@ pipeline {
                         -n ${K8S_NAMESPACE}
 
                     # Apply deployments
-                    kubectl apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
-                    kubectl apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
+                    kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
+                    kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
                     # Update image to latest
-                    kubectl set image deployment/student-app student-app=${DOCKER_IMAGE} \
+                    kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app student-app=${DOCKER_IMAGE} \
                         -n ${K8S_NAMESPACE} --record
 
                     # Check resources
-                    kubectl get pods -n ${K8S_NAMESPACE}
-                    kubectl get svc -n ${K8S_NAMESPACE}
+                    kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
+                    kubectl --kubeconfig=${KUBECONFIG} get svc -n ${K8S_NAMESPACE}
                 """
             }
         }
