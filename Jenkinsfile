@@ -7,23 +7,18 @@ pipeline {
 
     environment {
         DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
-
         IMAGE_TAG = "${env.GIT_COMMIT}"
-
         NEXUS_HOST = "192.168.33.10:8085"
         NEXUS_REPO = "docker-repo"
-
         DOCKER_IMAGE = "${NEXUS_HOST}/${NEXUS_REPO}/student-app:${IMAGE_TAG}"
-
         K8S_NAMESPACE = "devops"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
-
         SONAR_PROJECT_KEY = "student-app"
         SONAR_PROJECT_NAME = "Student App"
+        KUBECTL_CMD = "kubectl --kubeconfig=${KUBECONFIG}"
     }
 
     stages {
-
         stage('Checkout Git') {
             steps {
                 git branch: 'main', url: 'https://github.com/Rahmed999/Devops.git'
@@ -40,9 +35,9 @@ pipeline {
             steps {
                 withSonarQubeEnv('sonarqube') {
                     sh """
-                    mvn sonar:sonar \
-                      -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                      -Dsonar.projectName="${SONAR_PROJECT_NAME}"
+                        mvn sonar:sonar \
+                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                          -Dsonar.projectName="${SONAR_PROJECT_NAME}"
                     """
                 }
             }
@@ -56,42 +51,34 @@ pipeline {
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build & Push Docker Image') {
             steps {
-                sh "docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile ."
-            }
-        }
-
-        stage('Push Docker Image to Nexus') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CREDENTIALS,
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh """
-                    echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
-                    docker push ${DOCKER_IMAGE}
-                    docker logout ${NEXUS_HOST}
-                    """
+                dir('docker') {
+                    script {
+                        docker.withRegistry("http://${NEXUS_HOST}", DOCKER_CREDENTIALS) {
+                            def image = docker.build(DOCKER_IMAGE)
+                            image.push()
+                        }
+                    }
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh """
-                kubectl --kubeconfig=${KUBECONFIG} get ns ${K8S_NAMESPACE} || \
-                  kubectl --kubeconfig=${KUBECONFIG} create ns ${K8S_NAMESPACE}
+                script {
+                    // Ensure namespace exists
+                    sh "${KUBECTL_CMD} get ns ${K8S_NAMESPACE} || ${KUBECTL_CMD} create ns ${K8S_NAMESPACE}"
 
-                kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
-                kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
+                    // Apply all manifests at once
+                    sh "${KUBECTL_CMD} apply -f kub/ -n ${K8S_NAMESPACE}"
 
-                kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app \
-                  student-app=${DOCKER_IMAGE} -n ${K8S_NAMESPACE}
+                    // Update deployment image
+                    sh "${KUBECTL_CMD} set image deployment/student-app student-app=${DOCKER_IMAGE} -n ${K8S_NAMESPACE} --record"
 
-                kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
-                """
+                    // Wait for rollout to complete
+                    sh "${KUBECTL_CMD} rollout status deployment/student-app -n ${K8S_NAMESPACE}"
+                }
             }
         }
     }
