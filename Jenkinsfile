@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     tools { 
-        maven 'M2_HOME'   // Make sure this matches your Jenkins Maven tool name
+        maven 'M2_HOME'   // Jenkins Maven installation
     }
 
     environment {
@@ -10,15 +10,15 @@ pipeline {
 
         IMAGE_TAG = "${env.GIT_COMMIT}"
 
-        NEXUS_HOST = "192.168.33.10:8085"      // Nexus docker port
+        NEXUS_HOST = "192.168.33.10:8085"
         NEXUS_REPO = "docker-repo"
 
         DOCKER_IMAGE = "${NEXUS_HOST}/${NEXUS_REPO}/student-app:${IMAGE_TAG}"
 
         K8S_NAMESPACE = "devops"
 
-        // Make Jenkins use the vagrant kubeconfig
-        KUBECONFIG = "/home/vagrant/.kube/config"
+        // Use Jenkins kubeconfig (ensure this file exists and Jenkins can read it)
+        KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
 
     stages {
@@ -53,13 +53,12 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-
-                   sh '''
-                set -e
-                echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
-                docker push ${DOCKER_IMAGE}
-                docker logout ${NEXUS_HOST}
-            	'''
+                    sh '''
+                    set -e
+                    echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
+                    docker push ${DOCKER_IMAGE}
+                    docker logout ${NEXUS_HOST}
+                    '''
                 }
             }
         }
@@ -73,7 +72,7 @@ pipeline {
                     kubectl get ns ${K8S_NAMESPACE} || kubectl create ns ${K8S_NAMESPACE}
 
                     # Create docker secret only if it doesn't exist
-                    kubectl get secret nexus-secret -n ${K8S_NAMESPACE} || \
+                    kubectl get secret nexus-secret -n ${K8S_NAMESPACE} >/dev/null 2>&1 || \
                     kubectl create secret docker-registry nexus-secret \\
                         --docker-server=${NEXUS_HOST} \\
                         --docker-username=admin \\
@@ -85,11 +84,11 @@ pipeline {
                     kubectl apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
                     kubectl apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
-                    # Update image to latest
+                    # Update Spring app image
                     kubectl set image deployment/student-app student-app=${DOCKER_IMAGE} \
                         -n ${K8S_NAMESPACE} --record
 
-                    # Check resources
+                    # Show pods and services
                     kubectl get pods -n ${K8S_NAMESPACE}
                     kubectl get svc -n ${K8S_NAMESPACE}
                 """
