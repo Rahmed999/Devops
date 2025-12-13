@@ -1,8 +1,8 @@
 pipeline {
     agent any
 
-    tools { 
-        maven 'M2_HOME'   // Make sure this matches your Jenkins Maven tool name
+    tools {
+        maven 'M2_HOME'
     }
 
     environment {
@@ -10,89 +10,87 @@ pipeline {
 
         IMAGE_TAG = "${env.GIT_COMMIT}"
 
-        NEXUS_HOST = "192.168.33.10:8085"      // Nexus docker port
+        NEXUS_HOST = "192.168.33.10:8085"
         NEXUS_REPO = "docker-repo"
 
         DOCKER_IMAGE = "${NEXUS_HOST}/${NEXUS_REPO}/student-app:${IMAGE_TAG}"
 
         K8S_NAMESPACE = "devops"
-
-        // Explicit kubeconfig path for Jenkins
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
+
+        SONAR_PROJECT_KEY = "student-app"
+        SONAR_PROJECT_NAME = "Student App"
     }
 
     stages {
 
         stage('Checkout Git') {
             steps {
-                echo "Checking out Git repository..."
                 git branch: 'main', url: 'https://github.com/Rahmed999/Devops.git'
             }
         }
 
-        stage('Build with Maven') {
+        stage('Build & Unit Tests') {
             steps {
-                echo "Building project with Maven..."
-                sh 'mvn clean package -DskipTests'
+                sh 'mvn clean verify'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonarqube') {
+                    sh """
+                    mvn sonar:sonar \
+                      -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                      -Dsonar.projectName="${SONAR_PROJECT_NAME}"
+                    """
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 2, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "Building Docker image..."
                 sh "docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile ."
             }
         }
 
         stage('Push Docker Image to Nexus') {
             steps {
-                echo "Pushing Docker image to Nexus..."
-
                 withCredentials([usernamePassword(
                     credentialsId: DOCKER_CREDENTIALS,
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-
-                   sh '''
-                set -e
-                echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
-                docker push ${DOCKER_IMAGE}
-                docker logout ${NEXUS_HOST}
-            	'''
+                    sh """
+                    echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
+                    docker push ${DOCKER_IMAGE}
+                    docker logout ${NEXUS_HOST}
+                    """
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                echo "Deploying to Kubernetes..."
-
                 sh """
-                    # Ensure namespace exists
-                    kubectl --kubeconfig=${KUBECONFIG} get ns ${K8S_NAMESPACE} || \
-                        kubectl --kubeconfig=${KUBECONFIG} create ns ${K8S_NAMESPACE}
+                kubectl --kubeconfig=${KUBECONFIG} get ns ${K8S_NAMESPACE} || \
+                  kubectl --kubeconfig=${KUBECONFIG} create ns ${K8S_NAMESPACE}
 
-                    # Create docker secret only if it doesn't exist
-                    kubectl --kubeconfig=${KUBECONFIG} get secret nexus-secret -n ${K8S_NAMESPACE} || \
-                    kubectl --kubeconfig=${KUBECONFIG} create secret docker-registry nexus-secret \\
-                        --docker-server=${NEXUS_HOST} \\
-                        --docker-username=admin \\
-                        --docker-password=admin \\
-                        --docker-email=you@example.com \\
-                        -n ${K8S_NAMESPACE}
+                kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
+                kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
-                    # Apply deployments
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
+                kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app \
+                  student-app=${DOCKER_IMAGE} -n ${K8S_NAMESPACE}
 
-                    # Update image to latest
-                    kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app student-app=${DOCKER_IMAGE} \
-                        -n ${K8S_NAMESPACE} --record
-
-                    # Check resources
-                    kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
-                    kubectl --kubeconfig=${KUBECONFIG} get svc -n ${K8S_NAMESPACE}
+                kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
                 """
             }
         }
@@ -100,10 +98,10 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed successfully!'
+            echo '✅ Pipeline completed successfully!'
         }
         failure {
-            echo 'Pipeline failed. Check the logs!'
+            echo '❌ Pipeline failed!'
         }
     }
 }
