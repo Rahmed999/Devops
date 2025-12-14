@@ -37,18 +37,18 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonarqube') {
-                    sh """
-                        mvn sonar:sonar \
-                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                          -Dsonar.projectName="${SONAR_PROJECT_NAME}"
-                    """
+                    sh '''
+                      mvn sonar:sonar \
+                        -Dsonar.projectKey=student-app \
+                        -Dsonar.projectName="Student App"
+                    '''
                 }
             }
         }
 
         stage('Quality Gate') {
             steps {
-                timeout(time: 2, unit: 'MINUTES') {
+                timeout(time: 3, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
@@ -56,9 +56,9 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh """
-                    docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .
-                """
+                sh '''
+                  docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .
+                '''
             }
         }
 
@@ -69,35 +69,34 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh """
-                        echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
-                        docker push ${DOCKER_IMAGE}
-                        docker logout ${NEXUS_HOST}
-                    """
+                    sh '''
+                      echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
+                      docker push ${DOCKER_IMAGE}
+                      docker logout ${NEXUS_HOST}
+                    '''
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
-    steps {
-        sh """
-            kubectl --kubeconfig=${KUBECONFIG} get namespace ${K8S_NAMESPACE} \
-              || kubectl --kubeconfig=${KUBECONFIG} create namespace ${K8S_NAMESPACE}
+            steps {
+                sh '''
+                  kubectl --kubeconfig=${KUBECONFIG} get namespace ${K8S_NAMESPACE} \
+                    || kubectl --kubeconfig=${KUBECONFIG} create namespace ${K8S_NAMESPACE}
 
-            kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
-            kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
+                  kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
+                  kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
-            kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app \
-              student-app=${DOCKER_IMAGE} -n ${K8S_NAMESPACE}
+                  kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app \
+                    student-app=${DOCKER_IMAGE} -n ${K8S_NAMESPACE}
 
-            kubectl --kubeconfig=${KUBECONFIG} rollout status deployment/student-app \
-              -n ${K8S_NAMESPACE} --timeout=120s
+                  kubectl --kubeconfig=${KUBECONFIG} rollout status deployment/student-app \
+                    -n ${K8S_NAMESPACE} --timeout=300s
 
-            kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
-        """
-    }
-}
-
+                  kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
+                '''
+            }
+        }
     }
 
     post {
