@@ -7,9 +7,8 @@ pipeline {
 
     environment {
         DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
-        IMAGE_TAG = "${env.GIT_COMMIT}"
+        IMAGE_TAG = "${env.BUILD_NUMBER}"  // Use Jenkins build number to ensure unique tags
 
-        // ✅ FIXED PORT
         NEXUS_HOST = "192.168.33.10:8085"
         NEXUS_REPO = "docker-repo"
         DOCKER_IMAGE = "${NEXUS_HOST}/${NEXUS_REPO}/student-app:${IMAGE_TAG}"
@@ -40,8 +39,8 @@ pipeline {
                 withSonarQubeEnv('sonarqube') {
                     sh '''
                       mvn sonar:sonar \
-                        -Dsonar.projectKey=student-app \
-                        -Dsonar.projectName="Student App"
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                        -Dsonar.projectName="${SONAR_PROJECT_NAME}"
                     '''
                 }
             }
@@ -82,18 +81,29 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 sh '''
+                  # Ensure namespace exists
                   kubectl --kubeconfig=${KUBECONFIG} get namespace ${K8S_NAMESPACE} \
                     || kubectl --kubeconfig=${KUBECONFIG} create namespace ${K8S_NAMESPACE}
 
+                  # Deploy MySQL and wait until ready
                   kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
+                  kubectl wait --for=condition=Ready pod -l app=mysql -n ${K8S_NAMESPACE} --timeout=180s
+
+                  # Deploy Spring app
                   kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
+                  # Update image with unique tag
                   kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app \
                     student-app=${DOCKER_IMAGE} -n ${K8S_NAMESPACE}
 
+                  # Optional: force delete stuck pods (safety)
+                  kubectl --kubeconfig=${KUBECONFIG} delete pod -l app=student-app -n ${K8S_NAMESPACE} --force --grace-period=0 || true
+
+                  # Wait for rollout
                   kubectl --kubeconfig=${KUBECONFIG} rollout status deployment/student-app \
                     -n ${K8S_NAMESPACE} --timeout=300s
 
+                  # Show pods status
                   kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
                 '''
             }
