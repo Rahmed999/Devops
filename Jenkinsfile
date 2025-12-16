@@ -7,7 +7,7 @@ pipeline {
 
     environment {
         DOCKER_CREDENTIALS = "e0a06806-724b-42d2-9c5f-83a5d664075f"
-        IMAGE_TAG = "${env.BUILD_NUMBER}"  // Use Jenkins build number to ensure unique tags
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
 
         NEXUS_HOST = "192.168.33.10:8085"
         NEXUS_REPO = "docker-repo"
@@ -28,20 +28,31 @@ pipeline {
             }
         }
 
-        stage('Build & Unit Tests') {
+        stage('Build') {
             steps {
-                sh 'mvn clean verify'
+                sh 'mvn clean compile'
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                sh 'mvn test'
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonarqube') {
-                    sh '''
+                    sh """
                       mvn sonar:sonar \
                         -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                         -Dsonar.projectName="${SONAR_PROJECT_NAME}"
-                    '''
+                    """
                 }
             }
         }
@@ -56,9 +67,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh '''
-                  docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .
-                '''
+                sh 'docker build -t ${DOCKER_IMAGE} -f docker/Dockerfile .'
             }
         }
 
@@ -69,43 +78,34 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh '''
+                    sh """
                       echo "$DOCKER_PASS" | docker login ${NEXUS_HOST} -u "$DOCKER_USER" --password-stdin
                       docker push ${DOCKER_IMAGE}
                       docker logout ${NEXUS_HOST}
-                    '''
+                    """
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh '''
-                  # Ensure namespace exists
+                sh """
                   kubectl --kubeconfig=${KUBECONFIG} get namespace ${K8S_NAMESPACE} \
                     || kubectl --kubeconfig=${KUBECONFIG} create namespace ${K8S_NAMESPACE}
 
-                  # Deploy MySQL and wait until ready
                   kubectl --kubeconfig=${KUBECONFIG} apply -f kub/mysql-deployment.yaml -n ${K8S_NAMESPACE}
                   kubectl wait --for=condition=Ready pod -l app=mysql -n ${K8S_NAMESPACE} --timeout=180s
 
-                  # Deploy Spring app
                   kubectl --kubeconfig=${KUBECONFIG} apply -f kub/spring-deployment.yaml -n ${K8S_NAMESPACE}
 
-                  # Update image with unique tag
                   kubectl --kubeconfig=${KUBECONFIG} set image deployment/student-app \
                     student-app=${DOCKER_IMAGE} -n ${K8S_NAMESPACE}
 
-                  # Optional: force delete stuck pods (safety)
-                  kubectl --kubeconfig=${KUBECONFIG} delete pod -l app=student-app -n ${K8S_NAMESPACE} --force --grace-period=0 || true
-
-                  # Wait for rollout
                   kubectl --kubeconfig=${KUBECONFIG} rollout status deployment/student-app \
                     -n ${K8S_NAMESPACE} --timeout=300s
 
-                  # Show pods status
                   kubectl --kubeconfig=${KUBECONFIG} get pods -n ${K8S_NAMESPACE}
-                '''
+                """
             }
         }
     }
